@@ -2,6 +2,28 @@ import { GMAIL_SEARCH_QUERY } from '../constants';
 
 const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
+export class GmailApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'GmailApiError';
+    this.status = status;
+  }
+}
+
+export function isGmailUnauthorizedError(error: unknown): boolean {
+  if (error instanceof GmailApiError && error.status === 401) return true;
+  if (typeof error === 'object' && error !== null && 'status' in error) {
+    return (error as { status?: unknown }).status === 401;
+  }
+  if (error instanceof Error) {
+    return error.message.includes('Gmail list error 401') ||
+      error.message.includes('Gmail fetch error 401');
+  }
+  return false;
+}
+
 export interface RawGmailMessage {
   id: string;
   threadId: string;
@@ -25,10 +47,11 @@ interface GmailPart {
 export async function fetchGmailMessageIds(
   accessToken: string,
   maxResults = 200,
-  pageToken?: string
+  pageToken?: string,
+  query?: string
 ): Promise<{ messageIds: string[]; nextPageToken?: string }> {
   const params = new URLSearchParams({
-    q: GMAIL_SEARCH_QUERY,
+    q: query ?? GMAIL_SEARCH_QUERY,
     maxResults: String(maxResults),
   });
   if (pageToken) params.set('pageToken', pageToken);
@@ -39,7 +62,7 @@ export async function fetchGmailMessageIds(
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Gmail list error ${res.status}: ${err}`);
+    throw new GmailApiError(res.status, `Gmail list error ${res.status}: ${err}`);
   }
 
   const data = await res.json();
@@ -59,7 +82,8 @@ export async function fetchGmailMessage(
   });
 
   if (!res.ok) {
-    throw new Error(`Gmail fetch error ${res.status} for message ${messageId}`);
+    const err = await res.text();
+    throw new GmailApiError(res.status, `Gmail fetch error ${res.status} for message ${messageId}: ${err}`);
   }
 
   return res.json();

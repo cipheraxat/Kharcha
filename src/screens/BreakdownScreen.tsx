@@ -4,17 +4,20 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { PieChart, BarChart } from 'react-native-gifted-charts';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, PLATFORM_CONFIG } from '../constants';
+import { COLORS, FONTS, PLATFORM_CONFIG } from '../constants';
 import { useStore } from '../store';
 import { Platform } from '../types';
 import { BreakdownSkeleton } from '../components/SkeletonLoader';
+import { PlatformLogo } from '../components/PlatformLogo';
 import { formatCurrency } from '../utils/format';
+import { showDetail } from '../utils/showDetail';
+import { openAIInsight } from '../utils/openAIInsight';
 
 export default function BreakdownScreen() {
   const navigation = useNavigation();
@@ -67,7 +70,31 @@ export default function BreakdownScreen() {
         <Text style={styles.pageTitle}>Breakdown</Text>
 
         {/* Category split */}
-        <View style={styles.section}>
+        <TouchableOpacity
+          style={styles.section}
+          activeOpacity={0.9}
+          onPress={() => openAIInsight({
+            insightType: 'food_vs_grocery',
+            title: 'Food vs Grocery',
+            accent: `${foodPct}% food · ${groceryPct}% grocery`,
+            color: COLORS.warning,
+            icon: '🍲',
+            context: {
+              food_spend_inr: Math.round(foodTotal),
+              food_share_pct: foodPct,
+              grocery_spend_inr: Math.round(groceryTotal),
+              grocery_share_pct: groceryPct,
+              total_inr: Math.round(overallTotal),
+            },
+            rows: [
+              { label: 'Food spend', value: formatCurrency(foodTotal) },
+              { label: 'Food share', value: `${foodPct}%` },
+              { label: 'Grocery spend', value: formatCurrency(groceryTotal) },
+              { label: 'Grocery share', value: `${groceryPct}%` },
+              { label: 'Total', value: formatCurrency(overallTotal) },
+            ],
+          })}
+        >
           <Text style={styles.sectionTitle}>Food vs Grocery</Text>
           <View style={styles.splitBar}>
             <View style={[styles.splitFood, { flex: foodPct }]} />
@@ -83,7 +110,7 @@ export default function BreakdownScreen() {
               <Text style={styles.legendText}>Grocery {groceryPct}%</Text>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Platform pie */}
         {pieData.length > 0 && (
@@ -113,12 +140,34 @@ export default function BreakdownScreen() {
               {stats.spendByPlatform.map((p, i) => {
                 const cfg = PLATFORM_CONFIG[p.platform as Platform];
                 return (
-                  <View key={i} style={styles.pieLegendRow}>
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.pieLegendRow}
+                    activeOpacity={0.82}
+                    onPress={() => openAIInsight({
+                      insightType: 'platform_pie_slice',
+                      title: cfg.label,
+                      accent: `${formatCurrency(p.total)} · ${p.order_count} orders`,
+                      color: cfg.color,
+                      icon: cfg.emoji,
+                      context: {
+                        platform: p.platform,
+                        total_spend_inr: Math.round(p.total),
+                        order_count: p.order_count,
+                        avg_order_inr: p.order_count > 0 ? Math.round(p.total / p.order_count) : 0,
+                      },
+                      rows: [
+                        { label: 'Total spend', value: formatCurrency(p.total) },
+                        { label: 'Orders', value: p.order_count },
+                        { label: 'Average order', value: formatCurrency(p.total / p.order_count) },
+                      ],
+                    })}
+                  >
                     <View style={[styles.legendDot, { backgroundColor: cfg.color }]} />
                     <Text style={styles.legendText}>{cfg.label}</Text>
                     <Text style={styles.legendAmount}>{formatCurrency(p.total)}</Text>
                     <Text style={styles.legendCount}>{p.order_count} orders</Text>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -157,8 +206,32 @@ export default function BreakdownScreen() {
             const cfg = PLATFORM_CONFIG[p.platform as Platform];
             const pct = platformTotal > 0 ? Math.round((p.total / platformTotal) * 100) : 0;
             return (
-              <View key={i} style={styles.platformRow}>
-                <Text style={styles.platformEmoji}>{cfg.emoji}</Text>
+              <TouchableOpacity
+                key={i}
+                style={styles.platformRow}
+                activeOpacity={0.82}
+                onPress={() => openAIInsight({
+                  insightType: 'platform_summary',
+                  title: cfg.label,
+                  accent: `${pct}% share · ${p.order_count} orders`,
+                  color: cfg.color,
+                  icon: cfg.emoji,
+                  context: {
+                    platform: p.platform,
+                    total_spend_inr: Math.round(p.total),
+                    share_of_platform_spend_pct: pct,
+                    order_count: p.order_count,
+                    avg_order_inr: p.order_count > 0 ? Math.round(p.total / p.order_count) : 0,
+                  },
+                  rows: [
+                    { label: 'Total spend', value: formatCurrency(p.total) },
+                    { label: 'Share of platform spend', value: `${pct}%` },
+                    { label: 'Orders', value: p.order_count },
+                    { label: 'Average order', value: formatCurrency(p.total / p.order_count) },
+                  ],
+                })}
+              >
+                <PlatformLogo platform={p.platform} size="small" />
                 <View style={{ flex: 1 }}>
                   <View style={styles.platformRowHeader}>
                     <Text style={styles.platformName}>{cfg.label}</Text>
@@ -178,7 +251,7 @@ export default function BreakdownScreen() {
                     {p.order_count} orders · avg {formatCurrency(p.total / p.order_count)}
                   </Text>
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </View>
@@ -209,27 +282,27 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
   pageTitle: {
-    fontSize: 26,
-    fontWeight: '800',
+    fontSize: 28,
+    fontFamily: FONTS.displayLg,
     color: COLORS.textPrimary,
     paddingTop: 16,
     marginBottom: 20,
+    letterSpacing: -0.5,
   },
   section: { marginBottom: 28 },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontFamily: FONTS.labelCaps,
+    color: COLORS.textMuted,
+    letterSpacing: 0.8,
     marginBottom: 14,
   },
   splitBar: {
-    height: 10,
-    borderRadius: 5,
+    height: 8,
+    borderRadius: 999,
     overflow: 'hidden',
     flexDirection: 'row',
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.cardStrong,
     marginBottom: 10,
   },
   splitFood: { backgroundColor: COLORS.warning },
@@ -237,10 +310,10 @@ const styles = StyleSheet.create({
   splitLegend: { flexDirection: 'row', gap: 20 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 13, color: COLORS.textSecondary },
+  legendText: { fontSize: 13, fontFamily: FONTS.bodyMain, color: COLORS.textSecondary },
   pieContainer: { alignItems: 'center', marginVertical: 10 },
-  pieCenterLabel: { fontSize: 11, color: COLORS.textMuted },
-  pieCenterValue: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary },
+  pieCenterLabel: { fontSize: 11, fontFamily: FONTS.labelCaps, color: COLORS.textMuted },
+  pieCenterValue: { fontSize: 20, fontFamily: FONTS.displayLg, color: COLORS.textPrimary },
   pieLegend: { marginTop: 16 },
   pieLegendRow: {
     flexDirection: 'row',
@@ -252,19 +325,21 @@ const styles = StyleSheet.create({
   },
   legendAmount: {
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: FONTS.dataMono,
     color: COLORS.textPrimary,
     marginLeft: 'auto',
   },
-  legendCount: { fontSize: 12, color: COLORS.textMuted, marginLeft: 8 },
+  legendCount: { fontSize: 12, fontFamily: FONTS.bodyMain, color: COLORS.textMuted, marginLeft: 8 },
   platformRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: COLORS.card,
-    borderRadius: 14,
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 10,
     gap: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   platformEmoji: { fontSize: 24, width: 32 },
   platformRowHeader: {
@@ -272,21 +347,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-  platformName: { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
-  platformTotal: { fontSize: 15, fontWeight: '800' },
+  platformName: { fontSize: 15, fontFamily: FONTS.bodyStrong, color: COLORS.textPrimary },
+  platformTotal: { fontSize: 15, fontFamily: FONTS.dataMono },
   platformBar: {
     height: 4,
-    backgroundColor: COLORS.border,
-    borderRadius: 2,
+    backgroundColor: COLORS.cardStrong,
+    borderRadius: 999,
     overflow: 'hidden',
     marginBottom: 6,
   },
-  platformBarFill: { height: '100%', borderRadius: 2 },
-  platformMeta: { fontSize: 12, color: COLORS.textMuted },
+  platformBarFill: { height: '100%', borderRadius: 999 },
+  platformMeta: { fontSize: 12, fontFamily: FONTS.bodyMain, color: COLORS.textMuted },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyEmoji: { fontSize: 56, marginBottom: 16 },
-  emptyTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 10 },
-  emptyText: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 28 },
+  emptyTitle: { fontSize: 22, fontFamily: FONTS.displayLg, color: COLORS.textPrimary, marginBottom: 10 },
+  emptyText: { fontSize: 14, fontFamily: FONTS.bodyMain, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 28 },
   emptyBtn: {
     backgroundColor: COLORS.accent,
     borderRadius: 14,
@@ -295,5 +370,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  emptyBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  emptyBtnText: { fontSize: 15, fontFamily: FONTS.bodyStrong, color: '#fff' },
 });

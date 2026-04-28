@@ -1,4 +1,14 @@
 export type Platform = 'swiggy' | 'zomato' | 'blinkit' | 'bigbasket' | 'zepto';
+
+export interface GmailAccount {
+  email: string;
+  accessToken: string;
+  authRefreshToken?: string;
+  /** Which platforms this account's inbox is searched for */
+  assignedPlatforms: Platform[];
+  /** True for the account used to sign in to Supabase */
+  isPrimary: boolean;
+}
 export type Category = 'food' | 'grocery';
 
 export interface OrderItem {

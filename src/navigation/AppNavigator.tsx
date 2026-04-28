@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../constants';
+import { COLORS, FONTS } from '../constants';
 import { useStore } from '../store';
 
 // Screens
@@ -58,7 +58,7 @@ function MainTabs() {
         },
         tabBarActiveTintColor: COLORS.accent,
         tabBarInactiveTintColor: COLORS.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginTop: 2 },
+        tabBarLabelStyle: { fontSize: 11, fontFamily: FONTS.labelCaps, letterSpacing: 0.4, marginTop: 2 },
         tabBarItemStyle: {
           borderRadius: 18,
           marginHorizontal: 2,
@@ -87,6 +87,11 @@ function MainTabs() {
 
 export default function AppNavigator() {
   const session = useStore((s) => s.session);
+  const restoreGmailAccounts = useStore((s) => s.restoreGmailAccounts);
+
+  useEffect(() => {
+    restoreGmailAccounts();
+  }, []);
 
   return (
     <NavigationContainer>

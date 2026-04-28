@@ -9,9 +9,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { COLORS } from '../constants';
+import { COLORS, FONTS } from '../constants';
 import { useStore } from '../store';
 import { syncOrders } from '../services/syncService';
+import { isGmailUnauthorizedError } from '../services/gmail';
 import { fetchAllOrders, computeDashboardStats } from '../services/analyticsService';
 import { generateNudge } from '../services/nudgeService';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -20,7 +21,7 @@ export default function SyncScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const {
     session,
-    googleAccessToken,
+    gmailAccounts,
     setIsSyncing,
     setSyncProgress,
     setLastSyncedAt,
@@ -28,6 +29,7 @@ export default function SyncScreen() {
     setStats,
     setNudge,
     setIsLoadingData,
+    updateAccountToken,
   } = useStore();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -50,8 +52,19 @@ export default function SyncScreen() {
 
   const runSync = async () => {
     const userId = session?.user?.id;
-    if (!userId || !googleAccessToken) {
-      Alert.alert('Error', 'Not signed in');
+    const activeAccounts = gmailAccounts.filter((a) => a.accessToken && a.assignedPlatforms.length > 0);
+    const primaryAccount = gmailAccounts.find((a) => a.isPrimary);
+    if (!userId || activeAccounts.length === 0) {
+      Alert.alert('Error', 'No Gmail account connected');
+      navigation.goBack();
+      return;
+    }
+
+    if (primaryAccount?.email && session.user.email !== primaryAccount.email) {
+      Alert.alert(
+        'Primary login needs refresh',
+        `You are currently signed in as ${session.user.email}, but your primary Kharcha account is ${primaryAccount.email}. Please sign out and sign back in with your primary email, then sync again.`
+      );
       navigation.goBack();
       return;
     }
@@ -61,15 +74,25 @@ export default function SyncScreen() {
     try {
       setStatusText('Scanning your Gmail inbox...');
 
-      await syncOrders(googleAccessToken, userId, (p) => {
-        setSyncProgress({ total: p.total, processed: p.processed });
-        setProgress({ total: p.total, processed: p.processed });
-        if (p.done) {
-          setStatusText(`Found ${p.inserted} new orders!`);
-        } else if (p.total > 0) {
-          setStatusText(`Processing ${p.processed} of ${p.total} emails...`);
-        }
-      });
+      await syncOrders(
+        activeAccounts,
+        userId,
+        (p) => {
+          setSyncProgress({ total: p.total, processed: p.processed });
+          setProgress({ total: p.total, processed: p.processed });
+          if (p.done) {
+            const expiredAccounts = [...new Set(p.expiredAccounts)];
+            if (expiredAccounts.length > 0) {
+              setStatusText(`Relink needed for ${expiredAccounts.join(', ')}`);
+            } else {
+              setStatusText(`Found ${p.inserted} new orders!`);
+            }
+          } else if (p.total > 0) {
+            setStatusText(`Processing ${p.processed} of ${p.total} emails...`);
+          }
+        },
+        { onAccountTokenRefresh: updateAccountToken }
+      );
 
       setStatusText('Crunching the numbers...');
       setIsLoadingData(true);
@@ -87,8 +110,14 @@ export default function SyncScreen() {
       setLastSyncedAt(new Date().toISOString());
       setStatusText('All done! ✨');
     } catch (err: any) {
-      console.error('[SyncScreen]', err);
-      setStatusText('Sync completed (some emails may have been skipped)');
+      if (isGmailUnauthorizedError(err)) {
+        console.warn('[SyncScreen] Gmail auth expired during sync:', err);
+        setStatusText('Relink needed for one Gmail account');
+        Alert.alert('Gmail needs reconnecting', 'Please reconnect the affected Gmail account from Profile, then sync again.');
+      } else {
+        console.warn('[SyncScreen] Sync failed:', err);
+        setStatusText('Sync completed (some emails may have been skipped)');
+      }
     } finally {
       setIsSyncing(false);
       setIsLoadingData(false);
@@ -181,13 +210,13 @@ const styles = StyleSheet.create({
   kicker: {
     color: COLORS.accentGold,
     fontSize: 11,
-    fontWeight: '800',
+    fontFamily: FONTS.labelCaps,
     letterSpacing: 1.2,
     marginBottom: 12,
   },
   title: {
     fontSize: 28,
-    fontWeight: '800',
+    fontFamily: FONTS.displayLg,
     color: COLORS.textPrimary,
     marginBottom: 10,
     textAlign: 'center',
@@ -195,6 +224,7 @@ const styles = StyleSheet.create({
   },
   status: {
     fontSize: 15,
+    fontFamily: FONTS.bodyMain,
     color: COLORS.textSecondary,
     textAlign: 'center',
     marginBottom: 28,
@@ -224,15 +254,17 @@ const styles = StyleSheet.create({
   },
   progressFootnote: {
     fontSize: 12,
+    fontFamily: FONTS.bodyMain,
     color: COLORS.textMuted,
   },
   progressLabel: {
     fontSize: 13,
+    fontFamily: FONTS.dataMono,
     color: COLORS.textPrimary,
-    fontWeight: '800',
   },
   note: {
     fontSize: 13,
+    fontFamily: FONTS.bodyMain,
     color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 20,

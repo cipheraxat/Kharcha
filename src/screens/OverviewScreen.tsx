@@ -6,16 +6,22 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, PLATFORM_CONFIG } from '../constants';
+import { COLORS, FONTS, PLATFORM_CONFIG } from '../constants';
 import { useStore } from '../store';
+import { Platform } from '../types';
 import { fetchAllOrders, computeDashboardStats } from '../services/analyticsService';
 import { generateNudge } from '../services/nudgeService';
+import { isGmailUnauthorizedError } from '../services/gmail';
 import { OverviewSkeleton } from '../components/SkeletonLoader';
+import { PlatformLogo } from '../components/PlatformLogo';
 import { formatCurrency } from '../utils/format';
+import { showDetail } from '../utils/showDetail';
+import { openAIInsight } from '../utils/openAIInsight';
 
 function SpendChangeChip({ thisMonth, lastMonth }: { thisMonth: number; lastMonth: number }) {
   if (lastMonth === 0) return null;
@@ -39,7 +45,7 @@ export default function OverviewScreen() {
   const navigation = useNavigation();
   const {
     session,
-    googleAccessToken,
+    gmailAccounts,
     stats,
     nudge,
     isSyncing,
@@ -48,6 +54,7 @@ export default function OverviewScreen() {
     setNudge,
     setIsLoadingData,
     isLoadingData,
+    updateAccountToken,
   } = useStore();
 
   const [refreshing, setRefreshing] = React.useState(false);
@@ -82,14 +89,29 @@ export default function OverviewScreen() {
   };
 
   const onRefresh = async () => {
-    if (!googleAccessToken || !session?.user?.id) {
+    const activeAccounts = gmailAccounts.filter((a) => a.accessToken && a.assignedPlatforms.length > 0);
+    if (activeAccounts.length === 0 || !session?.user?.id) {
+      navigation.navigate('Sync' as never);
+      return;
+    }
+    const primaryAccount = gmailAccounts.find((a) => a.isPrimary);
+    if (primaryAccount?.email && session.user.email !== primaryAccount.email) {
       navigation.navigate('Sync' as never);
       return;
     }
     setRefreshing(true);
     try {
       const { syncOrders } = await import('../services/syncService');
-      await syncOrders(googleAccessToken, session.user.id);
+      const result = await syncOrders(activeAccounts, session.user.id, undefined, {
+        onAccountTokenRefresh: updateAccountToken,
+      });
+      const expiredAccounts = [...new Set(result.expiredAccounts)];
+      if (expiredAccounts.length > 0) {
+        Alert.alert(
+          'Gmail needs reconnecting',
+          `Please reconnect ${expiredAccounts.join(', ')} from Profile, then sync again.`
+        );
+      }
       // Use returned stats directly to avoid stale closure on `stats`
       const freshStats = await loadData();
       if (freshStats) {
@@ -97,7 +119,12 @@ export default function OverviewScreen() {
         setNudge(n);
       }
     } catch (e) {
-      console.error(e);
+      if (isGmailUnauthorizedError(e)) {
+        console.warn('[OverviewScreen] Gmail auth expired during refresh:', e);
+        Alert.alert('Gmail needs reconnecting', 'Please reconnect the affected Gmail account from Profile, then sync again.');
+      } else {
+        console.warn('[OverviewScreen] Refresh failed:', e);
+      }
     } finally {
       setRefreshing(false);
     }
@@ -140,7 +167,32 @@ export default function OverviewScreen() {
         ) : (
           <>
             {/* Main KPI card */}
-            <View style={styles.mainCard}>
+            <TouchableOpacity
+              style={styles.mainCard}
+              activeOpacity={0.82}
+              onPress={() => openAIInsight({
+                insightType: 'monthly_pulse',
+                title: 'Monthly Pulse',
+                accent: `${stats.ordersThisMonth} orders this month`,
+                color: COLORS.accent,
+                icon: '📊',
+                context: {
+                  total_spend_this_month_inr: Math.round(stats.totalSpendThisMonth),
+                  total_spend_last_month_inr: Math.round(stats.totalSpendLastMonth),
+                  orders_this_month: stats.ordersThisMonth,
+                  avg_order_value_inr: Math.round(stats.avgOrderValue),
+                  total_savings_inr: Math.round(stats.totalSavings),
+                  total_delivery_fees_inr: Math.round(stats.totalDeliveryFees),
+                  platforms_active: stats.spendByPlatform.length,
+                },
+                rows: [
+                  { label: 'Spent this month', value: formatCurrency(stats.totalSpendThisMonth) },
+                  { label: 'Spent last month', value: formatCurrency(stats.totalSpendLastMonth) },
+                  { label: 'Orders this month', value: stats.ordersThisMonth },
+                  { label: 'Average order', value: formatCurrency(stats.avgOrderValue) },
+                ],
+              })}
+            >
               <Text style={styles.kpiEyebrow}>MONTHLY PULSE</Text>
               <Text style={styles.kpiLabel}>Spent this month</Text>
               <Text style={styles.kpiValue}>
@@ -157,7 +209,7 @@ export default function OverviewScreen() {
                 </View>
                 <Text style={styles.kpiFooterCaption}>Updated from Gmail receipts</Text>
               </View>
-            </View>
+            </TouchableOpacity>
 
             {/* Quick stats row */}
             <View style={styles.statsRow}>
@@ -166,30 +218,62 @@ export default function OverviewScreen() {
                 value={String(stats.ordersThisMonth)}
                 icon="bag-outline"
                 color={COLORS.accent}
+                details={[
+                  ['Orders this month', stats.ordersThisMonth],
+                  ['Tracked across', `${stats.spendByPlatform.length} platforms`],
+                ]}
               />
               <StatCard
                 label="Avg order"
                 value={formatCurrency(stats.avgOrderValue)}
                 icon="receipt-outline"
                 color={COLORS.warning}
+                details={[
+                  ['Average order value', formatCurrency(stats.avgOrderValue)],
+                  ['This month orders', stats.ordersThisMonth],
+                ]}
               />
               <StatCard
                 label="Saved"
                 value={formatCurrency(stats.totalSavings)}
                 icon="pricetag-outline"
                 color={COLORS.success}
+                details={[
+                  ['Total saved', formatCurrency(stats.totalSavings)],
+                  ['Delivery fees paid', formatCurrency(stats.totalDeliveryFees)],
+                ]}
               />
             </View>
 
             {/* AI Nudge card */}
             {nudge && (
-              <View style={styles.nudgeCard}>
+              <TouchableOpacity
+                style={styles.nudgeCard}
+                activeOpacity={0.82}
+                onPress={() => openAIInsight({
+                  insightType: 'ai_nudge',
+                  title: 'Today’s AI Nudge',
+                  accent: 'Personalised for you',
+                  color: COLORS.accentLight,
+                  icon: '🤖',
+                  context: {
+                    current_nudge: nudge.message,
+                    total_spend_this_month_inr: Math.round(stats.totalSpendThisMonth),
+                    orders_this_month: stats.ordersThisMonth,
+                    top_platform: stats.topPlatform,
+                  },
+                  rows: [
+                    { label: 'Nudge', value: nudge.message },
+                    { label: 'Generated on', value: nudge.generated_at },
+                  ],
+                })}
+              >
                 <View style={styles.nudgeHeader}>
                   <Text style={styles.nudgeIcon}>🤖</Text>
                   <Text style={styles.nudgeTitle}>AI Insight</Text>
                 </View>
                 <Text style={styles.nudgeText}>{nudge.message}</Text>
-              </View>
+              </TouchableOpacity>
             )}
 
             {/* Top platform */}
@@ -208,7 +292,32 @@ export default function OverviewScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Your favourites</Text>
                 {stats.topVendors.slice(0, 3).map((v, i) => (
-                  <View key={i} style={styles.vendorRow}>
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.vendorRow}
+                    activeOpacity={0.82}
+                    onPress={() => openAIInsight({
+                      insightType: 'top_vendor',
+                      title: v.name,
+                      accent: `Rank #${i + 1} · ${PLATFORM_CONFIG[v.platform as keyof typeof PLATFORM_CONFIG]?.label ?? v.platform}`,
+                      color: PLATFORM_CONFIG[v.platform as keyof typeof PLATFORM_CONFIG]?.color ?? COLORS.accent,
+                      icon: '🏆',
+                      context: {
+                        vendor_name: v.name,
+                        rank: i + 1,
+                        platform: v.platform,
+                        total_spend_inr: Math.round(v.total),
+                        order_count: v.order_count,
+                        avg_order_inr: v.order_count > 0 ? Math.round(v.total / v.order_count) : 0,
+                      },
+                      rows: [
+                        { label: 'Rank', value: `#${i + 1}` },
+                        { label: 'Platform', value: PLATFORM_CONFIG[v.platform as keyof typeof PLATFORM_CONFIG]?.label ?? v.platform },
+                        { label: 'Total spend', value: formatCurrency(v.total) },
+                        { label: 'Orders', value: v.order_count },
+                      ],
+                    })}
+                  >
                     <View style={styles.vendorRank}>
                       <Text style={styles.vendorRankText}>{i + 1}</Text>
                     </View>
@@ -218,7 +327,7 @@ export default function OverviewScreen() {
                     <Text style={styles.vendorAmount}>
                       {formatCurrency(v.total)}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
             )}
@@ -229,20 +338,33 @@ export default function OverviewScreen() {
   );
 }
 
-function StatCard({ label, value, icon, color }: {
+function StatCard({ label, value, icon, color, details }: {
   label: string;
   value: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
+  details: [string, string | number][];
 }) {
   return (
-    <View style={styles.statCard}>
+    <TouchableOpacity
+      style={styles.statCard}
+      activeOpacity={0.82}
+      onPress={() => openAIInsight({
+        insightType: `quick_stat_${label.toLowerCase().replace(/\s+/g, '_')}`,
+        title: label,
+        accent: value,
+        color,
+        icon: '✨',
+        context: Object.fromEntries(details.map(([k, v]) => [k, v])),
+        rows: details.map(([l, v]) => ({ label: l, value: v })),
+      })}
+    >
       <View style={[styles.statIconWrap, { backgroundColor: `${color}22` }]}> 
         <Ionicons name={icon} size={18} color={color} />
       </View>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -256,8 +378,30 @@ function TopPlatformCard({ platform, spendByPlatform }: {
   const pct = total > 0 ? Math.round((spend?.total ?? 0) / total * 100) : 0;
 
   return (
-    <View style={styles.platformCard}> 
-      <Text style={styles.platformEmoji}>{cfg.emoji}</Text>
+    <TouchableOpacity
+      style={styles.platformCard}
+      activeOpacity={0.82}
+      onPress={() => openAIInsight({
+        insightType: 'top_platform',
+        title: cfg.label,
+        accent: `${pct}% of your total spend`,
+        color: cfg.color,
+        icon: cfg.emoji,
+        context: {
+          platform: platform,
+          share_of_total_pct: pct,
+          total_spend_inr: Math.round(spend?.total ?? 0),
+          order_count: spend?.order_count ?? 0,
+          avg_order_inr: spend && spend.order_count > 0 ? Math.round(spend.total / spend.order_count) : 0,
+        },
+        rows: [
+          { label: 'Share of total spend', value: `${pct}%` },
+          { label: 'Total spend', value: formatCurrency(spend?.total ?? 0) },
+          { label: 'Orders', value: spend?.order_count ?? 0 },
+        ],
+      })}
+    > 
+      <PlatformLogo platform={platform as Platform} size="regular" />
       <View style={{ flex: 1 }}>
         <Text style={styles.platformLabel}>{cfg.label}</Text>
         <Text style={styles.platformPct}>{pct}% of your total spend</Text>
@@ -265,7 +409,7 @@ function TopPlatformCard({ platform, spendByPlatform }: {
       <Text style={[styles.platformAmount, { color: cfg.color }]}>
         ₹{Math.round(spend?.total ?? 0).toLocaleString('en-IN')}
       </Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -295,7 +439,7 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: 'rgba(124, 92, 255, 0.12)',
+    backgroundColor: 'rgba(124, 92, 255, 0.1)',
   },
   header: {
     flexDirection: 'row',
@@ -305,11 +449,11 @@ const styles = StyleSheet.create({
   },
   greeting: {
     fontSize: 28,
-    fontWeight: '800',
+    fontFamily: FONTS.displayLg,
     color: COLORS.textPrimary,
     letterSpacing: -0.8,
   },
-  subtitle: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4, maxWidth: 230, lineHeight: 20 },
+  subtitle: { fontSize: 14, fontFamily: FONTS.bodyMain, color: COLORS.textSecondary, marginTop: 4, maxWidth: 230, lineHeight: 20 },
   syncBtn: {
     width: 46,
     height: 46,
@@ -322,27 +466,27 @@ const styles = StyleSheet.create({
   },
   mainCard: {
     backgroundColor: COLORS.cardStrong,
-    borderRadius: 28,
+    borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: COLORS.borderSoft,
+    borderColor: COLORS.border,
     marginBottom: 16,
   },
   kpiEyebrow: {
     color: COLORS.accentGold,
     fontSize: 11,
-    fontWeight: '800',
+    fontFamily: FONTS.labelCaps,
     letterSpacing: 1.2,
     marginBottom: 10,
   },
   kpiLabel: {
     fontSize: 13,
+    fontFamily: FONTS.dataMono,
     color: COLORS.textSecondary,
-    fontWeight: '700',
   },
   kpiValue: {
     fontSize: 48,
-    fontWeight: '800',
+    fontFamily: FONTS.displayLg,
     color: COLORS.textPrimary,
     letterSpacing: -1.5,
     marginTop: 8,
@@ -357,7 +501,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     gap: 4,
   },
-  chipText: { fontSize: 12, fontWeight: '600' },
+  chipText: { fontSize: 12, fontFamily: FONTS.dataMono },
   kpiFooterRow: {
     marginTop: 18,
     paddingTop: 16,
@@ -367,9 +511,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-end',
   },
-  kpiFooterLabel: { fontSize: 12, color: COLORS.textMuted, marginBottom: 4 },
-  kpiFooterValue: { fontSize: 14, color: COLORS.textPrimary, fontWeight: '700' },
-  kpiFooterCaption: { fontSize: 11, color: COLORS.textDim, maxWidth: 110, textAlign: 'right' },
+  kpiFooterLabel: { fontSize: 12, fontFamily: FONTS.bodyMain, color: COLORS.textMuted, marginBottom: 4 },
+  kpiFooterValue: { fontSize: 14, fontFamily: FONTS.bodyStrong, color: COLORS.textPrimary },
+  kpiFooterCaption: { fontSize: 11, fontFamily: FONTS.bodyMain, color: COLORS.textDim, maxWidth: 110, textAlign: 'right' },
   statsRow: {
     flexDirection: 'row',
     gap: 10,
@@ -378,32 +522,34 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     backgroundColor: COLORS.surface,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   statIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
   statValue: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 17,
+    fontFamily: FONTS.displayLg,
     color: COLORS.textPrimary,
   },
-  statLabel: { fontSize: 11, color: COLORS.textSecondary, marginTop: 4, lineHeight: 15 },
+  statLabel: { fontSize: 11, fontFamily: FONTS.bodyMain, color: COLORS.textSecondary, marginTop: 3, lineHeight: 15 },
   nudgeCard: {
-    backgroundColor: '#161B31',
-    borderRadius: 24,
+    backgroundColor: COLORS.surfaceMuted,
+    borderRadius: 16,
     padding: 18,
     marginBottom: 18,
     borderWidth: 1,
-    borderColor: '#2D2F50',
+    borderColor: COLORS.border,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.accent,
   },
   nudgeHeader: {
     flexDirection: 'row',
@@ -413,31 +559,30 @@ const styles = StyleSheet.create({
   },
   nudgeIcon: { fontSize: 16 },
   nudgeTitle: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontFamily: FONTS.labelCaps,
     color: COLORS.accentLight,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   nudgeText: {
     fontSize: 14,
+    fontFamily: FONTS.bodyMain,
     color: COLORS.textSecondary,
     lineHeight: 21,
   },
   section: { marginBottom: 14 },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontFamily: FONTS.labelCaps,
+    color: COLORS.textMuted,
+    letterSpacing: 0.8,
     marginBottom: 10,
   },
   vendorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: 16,
+    borderRadius: 14,
     padding: 12,
     marginBottom: 8,
     gap: 12,
@@ -447,38 +592,39 @@ const styles = StyleSheet.create({
   vendorRank: {
     width: 28,
     height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.border,
+    borderRadius: 8,
+    backgroundColor: COLORS.cardStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  vendorRankText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary },
-  vendorName: { flex: 1, fontSize: 14, color: COLORS.textPrimary, fontWeight: '600' },
-  vendorAmount: { fontSize: 14, color: COLORS.textPrimary, fontWeight: '700' },
+  vendorRankText: { fontSize: 13, fontFamily: FONTS.dataMono, color: COLORS.textMuted },
+  vendorName: { flex: 1, fontSize: 14, fontFamily: FONTS.bodyStrong, color: COLORS.textPrimary },
+  vendorAmount: { fontSize: 14, fontFamily: FONTS.dataMono, color: COLORS.textPrimary },
   platformCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 14,
     gap: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
   platformEmoji: { fontSize: 24 },
-  platformLabel: { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
-  platformPct: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
-  platformAmount: { fontSize: 18, fontWeight: '800' },
+  platformLabel: { fontSize: 15, fontFamily: FONTS.bodyStrong, color: COLORS.textPrimary },
+  platformPct: { fontSize: 12, fontFamily: FONTS.bodyMain, color: COLORS.textSecondary, marginTop: 2 },
+  platformAmount: { fontSize: 18, fontFamily: FONTS.dataMono },
   empty: { flex: 1, alignItems: 'center', paddingTop: 60, paddingHorizontal: 20 },
   emptyEmoji: { fontSize: 56, marginBottom: 16 },
   emptyTitle: {
     fontSize: 22,
-    fontWeight: '800',
+    fontFamily: FONTS.displayLg,
     color: COLORS.textPrimary,
     marginBottom: 10,
   },
   emptyDesc: {
     fontSize: 14,
+    fontFamily: FONTS.bodyMain,
     color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
@@ -492,5 +638,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  emptyBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  emptyBtnText: { fontSize: 15, fontFamily: FONTS.bodyStrong, color: '#fff' },
 });
