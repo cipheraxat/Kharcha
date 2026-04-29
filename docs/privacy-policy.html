@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy – Kharcha</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #1a1a1a;
+      background: #fff;
+      line-height: 1.7;
+      font-size: 16px;
+    }
+    .container { max-width: 720px; margin: 0 auto; padding: 48px 24px 80px; }
+    .logo { font-size: 22px; font-weight: 700; color: #FC8019; margin-bottom: 8px; }
+    h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; }
+    .updated { color: #666; font-size: 14px; margin-bottom: 40px; }
+    h2 { font-size: 18px; font-weight: 600; margin: 36px 0 10px; }
+    p { margin-bottom: 14px; }
+    ul { padding-left: 22px; margin-bottom: 14px; }
+    li { margin-bottom: 6px; }
+    a { color: #FC8019; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .highlight {
+      background: #fff8f2;
+      border-left: 4px solid #FC8019;
+      padding: 14px 18px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    footer { margin-top: 60px; font-size: 13px; color: #999; border-top: 1px solid #eee; padding-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">Kharcha</div>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: April 29, 2026</p>
+
+    <div class="highlight">
+      Kharcha is a personal finance tracking app that reads your food and grocery delivery receipt emails to help you understand your spending. We never send emails, modify your inbox, or share your data with third parties.
+    </div>
+
+    <h2>1. What We Collect</h2>
+    <p>Kharcha collects only the minimum data needed to provide receipt tracking:</p>
+    <ul>
+      <li><strong>Gmail receipts:</strong> Order confirmation emails from Swiggy, Zomato, Blinkit, BigBasket, and Zepto. We read only emails matching known delivery receipt subjects.</li>
+      <li><strong>Parsed order data:</strong> Platform name, order date, total amount, delivery fee, discount, and restaurant/store name extracted from those receipts.</li>
+      <li><strong>Google account email address:</strong> Used to identify which Gmail account a sync belongs to. Stored locally on your device.</li>
+    </ul>
+    <p>We do <strong>not</strong> collect email body text, attachments, contact lists, calendar data, or any other Gmail content.</p>
+
+    <h2>2. How We Use Your Gmail Access</h2>
+    <p>Kharcha requests the <code>https://www.googleapis.com/auth/gmail.readonly</code> scope. This is used solely to:</p>
+    <ul>
+      <li>Search for delivery receipt emails from specific senders (e.g. orders@swiggy.in)</li>
+      <li>Parse the amount, date, and restaurant name from those receipts</li>
+      <li>Display spending summaries and breakdowns within the app</li>
+    </ul>
+    <p>We <strong>never</strong> read emails from any other sender, modify or delete emails, send emails on your behalf, or access any other Google services.</p>
+
+    <h2>3. How We Store Your Data</h2>
+    <p>Parsed order data (amounts, dates, platform, restaurant) is stored in a secure cloud database (Supabase, hosted on AWS) associated with your account. Raw email content is never stored — only the structured data extracted from each receipt.</p>
+    <p>Your Gmail access token is stored securely on your device using the OS keychain (Expo SecureStore) and is used only during sync. It is never transmitted to our servers.</p>
+
+    <h2>4. Data Sharing</h2>
+    <p>We do not sell, rent, or share your personal data with any third parties. Your spending data is visible only to you within the Kharcha app.</p>
+    <p>We use the following sub-processors to operate the service:</p>
+    <ul>
+      <li><strong>Supabase</strong> (supabase.com) — Cloud database and authentication</li>
+      <li><strong>Google OAuth</strong> — Authentication and Gmail API access</li>
+    </ul>
+
+    <h2>5. Data Retention and Deletion</h2>
+    <p>Your data is retained as long as your account is active. You can delete all your data at any time by signing out and contacting us at the email below. We will permanently delete your account and all associated order data within 30 days of a deletion request.</p>
+
+    <h2>6. Security</h2>
+    <p>Access tokens are stored in your device's secure enclave. All data transmitted between the app and our servers uses HTTPS/TLS encryption. We follow industry-standard security practices and perform regular security reviews.</p>
+
+    <h2>7. Children's Privacy</h2>
+    <p>Kharcha is not directed at children under 13. We do not knowingly collect personal information from children.</p>
+
+    <h2>8. Changes to This Policy</h2>
+    <p>If we make material changes to this policy, we will update the "Last updated" date above and notify users through the app. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
+
+    <h2>9. Contact Us</h2>
+    <p>If you have questions about this privacy policy or want to request data deletion, contact us at:</p>
+    <p><a href="mailto:akshatanandmallik@gmail.com">akshatanandmallik@gmail.com</a></p>
+
+    <footer>
+      &copy; 2026 Kharcha &middot; <a href="mailto:akshatanandmallik@gmail.com">Contact</a>
+    </footer>
+  </div>
+</body>
+</html>
